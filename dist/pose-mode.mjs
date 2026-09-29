@@ -1,4 +1,4 @@
-import {POSES as FULL_POSES,REQUIRED,CONNECTIONS,scorePose,poseSVG} from './game-core.mjs?v=4';
+import {POSES as FULL_POSES,REQUIRED,CONNECTIONS,scorePose} from './game-core.mjs?v=4';
 export const BODY_MODES={full:'전신',upper:'상체'};
 export const UPPER_REQUIRED=[0,11,12,13,14,15,16];
 export const UPPER_CONNECTIONS=[[11,12],[11,13],[13,15],[12,14],[14,16]];
@@ -85,9 +85,9 @@ export function scoreUpperPose(points,target){
 }
 export const scoreFor=(points,target,mode)=>mode==='upper'?scoreUpperPose(points,target):scorePose(points,target);
 export function renderPose(pose){
-  if(pose.bodyMode!=='upper')return poseSVG(pose);
-  const points=pose.points.filter(Boolean),xs=points.map(p=>p.x),ys=points.map(p=>p.y),minX=Math.min(...xs)-.2,maxX=Math.max(...xs)+.2,minY=Math.min(...ys)-.2,maxY=Math.max(...ys)+.2;
-  const scale=Math.min(270/(maxX-minX),210/(maxY-minY)),project=p=>({x:150+(p.x-(minX+maxX)/2)*scale,y:120+(p.y-(minY+maxY)/2)*scale});
-  const lines=UPPER_CONNECTIONS.map(([a,b])=>{const A=project(pose.points[a]),B=project(pose.points[b]);return `<line x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}"/>`;}).join('');const h=project(pose.points[0]);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="240" viewBox="0 0 300 240" aria-hidden="true"><g fill="none" stroke="#263716" stroke-width="9" stroke-linecap="round">${lines}</g><circle cx="${h.x}" cy="${h.y}" r="${scale*.13}" fill="#263716"/>${UPPER_REQUIRED.slice(1).map(i=>{const p=project(pose.points[i]);return `<circle cx="${p.x}" cy="${p.y}" r="3" fill="#ecffb0"/>`;}).join('')}</svg>`;
+  const points=pose.points.filter(Boolean),xs=points.map(p=>p.x),ys=points.map(p=>p.y),minX=Math.min(...xs)-.18,maxX=Math.max(...xs)+.18,minY=Math.min(...ys)-.18,maxY=Math.max(...ys)+.18;
+  const project=p=>({x:(p.x-minX)*100,y:(p.y-minY)*100});
+  const lines=connectionsFor(pose.bodyMode).map(([a,b])=>{const A=project(pose.points[a]),B=project(pose.points[b]);return `<line x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}"/>`;}).join('');const h=project(pose.points[0]);
+  const neck=pose.bodyMode==='upper'?'':`<line x1="${(project(pose.points[11]).x+project(pose.points[12]).x)/2}" y1="${project(pose.points[11]).y}" x2="${h.x}" y2="${h.y+13}"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${(maxX-minX)*100} ${(maxY-minY)*100}" aria-hidden="true"><g fill="none" stroke="#263716" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round">${lines}${neck}</g><circle cx="${h.x}" cy="${h.y}" r="13" fill="#263716"/>${requiredFor(pose.bodyMode).filter(i=>i!==0).map(i=>{const p=project(pose.points[i]);return `<circle cx="${p.x}" cy="${p.y}" r="2.5" fill="#ecffb0"/>`;}).join('')}</svg>`;
 }

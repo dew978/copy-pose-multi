@@ -1,5 +1,5 @@
 import {CONNECTIONS,DIFFICULTIES} from './game-core.mjs?v=4';
-import {posesFor,connectionsFor,bodyLabel} from './pose-mode.mjs?v=4';
+import {posesFor,connectionsFor,bodyLabel} from './pose-mode.mjs?v=10';
 import {validJPEG} from './transport-profile.mjs?v=4';
 const colors=['#70e4e8','#ffae8e','#d5b2ff','#ffc964','#91eb9d','#a8c2ff','#ff98c0','#f5ec8c'];
 export function galleryLayout(count,width=1280,height=720){
@@ -32,10 +32,8 @@ export class Gallery{
     boxes.forEach((b,i)=>{
       c.save();c.beginPath();c.rect(b.x,b.y,b.w,b.h);c.clip();
       if(i===poseCell){
-        c.fillStyle='#d9ff58';c.fillRect(b.x,b.y,b.w,b.h);text(c,'COPY THIS POSE',b.x+18,b.y+30,14,'#3e531f');text(c,DIFFICULTIES[pose.difficulty],b.x+b.w-18,b.y+30,13,'#3e531f','right');
-        drawPose(c,pose,{x:b.x+40,y:b.y+45,w:b.w-80,h:b.h-110});text(c,pose.name,b.x+b.w/2,b.y+b.h-36,20,'#243515','center');
-        const caption=state.phase==='playing'?`${Math.max(0,(state.end-now)/1000).toFixed(1)} SEC`:state.phase==='prepare'?`READY ${Math.max(1,Math.ceil((state.end-now)/1000))}`:state.phase==='finished'?'COMPLETE':`Round ${state.round} / ${state.totalRounds}`;
-        text(c,caption,b.x+b.w/2,b.y+b.h-13,14,'#3e531f','center');
+        c.fillStyle='#d9ff58';c.fillRect(b.x,b.y,b.w,b.h);text(c,'따라 할 포즈',b.x+18,b.y+30,18,'#3e531f');text(c,DIFFICULTIES[pose.difficulty],b.x+b.w-18,b.y+30,13,'#3e531f','right');
+        drawPose(c,pose,{x:b.x+20,y:b.y+48,w:b.w-40,h:b.h-64});
       }else{
         const member=members[playerIndex++];c.fillStyle='#1b2417';c.fillRect(b.x,b.y,b.w,b.h);
         if(!member){text(c,'참가자를 기다립니다',b.x+b.w/2,b.y+b.h/2,18,'#9eae94','center');c.restore();return;}
@@ -46,7 +44,7 @@ export class Gallery{
         const frame=frames.get(member.id)?.frame,project=p=>({x:videoBox.x+(1-p.x)*videoBox.w,y:videoBox.y+p.y*videoBox.h});
         if(live&&frame&&now-frame.time<1400)skeleton(c,frame.raw,project,color,members.length>8?2:3,connectionsFor(state.bodyMode));
         const dense=members.length>8,bar=dense?24:42,font=dense?11:16;c.fillStyle='#10150edc';c.fillRect(b.x,b.y+b.h-bar,b.w,bar);text(c,member.name.slice(0,dense?9:16),b.x+8,b.y+b.h-(dense?8:15),font,color);
-        const rank=state.ranking.find(p=>p.id===member.id),score=['result','finished'].includes(state.phase)?rank?.average:member.score;
+        const rank=state.ranking.find(p=>p.id===member.id),score=state.phase==='finished'?rank?.average:state.intermission?state.lastResult?.scores[member.id]:member.score;
         text(c,score==null?(member.ready?'READY':`${bodyLabel(state.bodyMode)} 대기`):`${score.toFixed(1)}%`,b.x+b.w-8,b.y+b.h-(dense?8:15),dense?12:18,member.ready?'#d9ff58':'#d5dfca','right');
         if(state.suddenDeath&&!state.contenders.includes(member.id)&&state.phase!=='finished'){c.fillStyle='#1119';c.fillRect(b.x,b.y,b.w,b.h-42);text(c,'결승 관전',b.x+b.w/2,b.y+30,15,'#fff','center');}
         if(member.id===state.winner){

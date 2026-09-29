@@ -1,5 +1,5 @@
-import {RoomGame} from './room-core.mjs?v=4';
-import {maskLandmarks,requiredFor,visibleFor} from './pose-mode.mjs?v=4';
+import {RoomGame} from './room-core.mjs?v=10';
+import {maskLandmarks,requiredFor,visibleFor} from './pose-mode.mjs?v=10';
 
 // Player numbers follow the mirrored camera's fixed screen halves.
 // Upper-body play never depends on the visibility or position of hips/legs.

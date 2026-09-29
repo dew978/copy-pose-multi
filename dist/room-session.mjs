@@ -1,4 +1,4 @@
-import {RoomGame,MAX_PLAYERS} from './room-core.mjs?v=4';
+import {RoomGame,MAX_PLAYERS} from './room-core.mjs?v=10';
 import {validJPEG,transportProfile,sendPreview,compactState} from './transport-profile.mjs?v=4';
 export const PROTOCOL=2;
 export const roomPeerId=code=>`copy-pose-multi-${code}`;

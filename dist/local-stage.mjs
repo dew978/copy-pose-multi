@@ -1,5 +1,5 @@
-import {Gallery,containRect} from './gallery.mjs?v=4';
-import {connectionsFor,bodyLabel} from './pose-mode.mjs?v=4';
+import {Gallery,containRect} from './gallery.mjs?v=10';
+import {connectionsFor,bodyLabel} from './pose-mode.mjs?v=10';
 const colors=['#70e4e8','#ffae8e'];
 const text=(c,value,x,y,size,color,align='left')=>{c.font=`800 ${size}px system-ui,sans-serif`;c.fillStyle=color;c.textAlign=align;c.fillText(value,x,y);};
 export class LocalStage extends Gallery{
@@ -27,7 +27,7 @@ export class LocalStage extends Gallery{
       c.fillStyle='#10150ede';c.fillRect(cell.x+18,18,185,45);text(c,p.name,cell.x+32,49,22,color);
       if(!live){text(c,count===1?'카메라 한 대로 연습':'이쪽에 서 주세요',cell.x+cell.w/2,H*.46,28,'#91a184','center');}
       c.fillStyle='#10150ee8';c.fillRect(cell.x+18,H-90,cell.w-36,70);
-      const score=['finished','result'].includes(state.phase)?state.ranking.find(r=>r.id===p.id)?.average:p.score;
+      const score=state.phase==='finished'?state.ranking.find(r=>r.id===p.id)?.average:state.intermission?state.lastResult?.scores[p.id]:p.score;
       text(c,p.ready?'READY':`${bodyLabel(state.bodyMode)} 인식 대기`,cell.x+34,H-46,19,p.ready?'#d9ff58':'#c5cfbc');
       text(c,Number.isFinite(score)?`${score.toFixed(1)}%`:'— %',cell.x+cell.w-34,H-42,32,color,'right');
       if(state.winner===p.id){

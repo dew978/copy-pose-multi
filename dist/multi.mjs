@@ -1,13 +1,14 @@
 import {DIFFICULTIES} from './game-core.mjs?v=4';
-import {posesFor,renderPose,bodyLabel,cameraHint} from './pose-mode.mjs?v=4';
+import {posesFor,renderPose,bodyLabel,cameraHint} from './pose-mode.mjs?v=10';
 import {MAX_PLAYERS,transportProfile,validJPEG,MAX_GALLERY_CHARS,sendPreview} from './transport-profile.mjs?v=4';
 import {PreviewEncoder} from './preview-frames.mjs?v=4';
-import {RoomGame} from './room-core.mjs?v=4';
-import {HostSession,PROTOCOL,roomPeerId,validCode,randomCode,send} from './room-session.mjs?v=5';
+import {RoomGame} from './room-core.mjs?v=10';
+import {HostSession,PROTOCOL,roomPeerId,validCode,randomCode,send} from './room-session.mjs?v=10';
 import {OnlineCamera} from './online-camera.mjs?v=8';
-import {LocalGame} from './local-game.mjs?v=8';
-import {LocalStage} from './local-stage.mjs?v=8';
-import {Gallery} from './gallery.mjs?v=4';
+import {LocalGame} from './local-game.mjs?v=10';
+import {LocalStage} from './local-stage.mjs?v=10';
+import {Gallery} from './gallery.mjs?v=10';
+import {roundFeedback} from './round-feedback.mjs?v=10';
 
 const $=id=>document.getElementById(id),show=(id,visible)=>$(id).classList.toggle('hidden',!visible);
 const phaseNames={lobby:'모집 중',waiting:'인식 대기',prepare:'곧 시작',playing:'포즈 맞추기',settling:'점수 계산',result:'라운드 결과',finished:'최종 결과'};
@@ -110,9 +111,10 @@ async function joinRoom(event){
 }
 function updateState(next){
   if(!next||!Array.isArray(next.members)||next.members.length>MAX_PLAYERS||!['full','upper'].includes(next.bodyMode)||!posesFor(next.bodyMode)[next.poseIndex])return;
-  state=next;camera.bodyMode=state.bodyMode;applyTransport();$('mode-label').textContent=bodyLabel(state.bodyMode);$('room').classList.toggle('many-players',state.members.length>8);
+  state=next;camera.bodyMode=state.bodyMode;$('room').dataset.bodyMode=state.bodyMode;applyTransport();$('mode-label').textContent=bodyLabel(state.bodyMode);$('room').classList.toggle('many-players',state.members.length>8);
   $('phase-label').textContent=phaseNames[state.phase]||'';$('round-label').textContent=state.suddenDeath?'TIE BREAK':`Round ${state.round} / ${state.totalRounds}`;$('member-count').textContent=role==='local'?(local.playerCount===1?'1인 연습':'2인 대결'):`${state.members.length} / ${MAX_PLAYERS}`;
-  if(poseIndex!==`${state.bodyMode}:${state.poseIndex}`){poseIndex=`${state.bodyMode}:${state.poseIndex}`;const pose=posesFor(state.bodyMode)[state.poseIndex];$('pose-picture').innerHTML=renderPose(pose);$('pose-picture').setAttribute('aria-label',`${DIFFICULTIES[pose.difficulty]} 난이도: ${pose.name}`);$('pose-name').textContent=pose.name;$('difficulty-label').textContent=DIFFICULTIES[pose.difficulty];}
+  if(poseIndex!==`${state.bodyMode}:${state.poseIndex}`){poseIndex=`${state.bodyMode}:${state.poseIndex}`;const pose=posesFor(state.bodyMode)[state.poseIndex];$('pose-picture').innerHTML=renderPose(pose);$('pose-picture').setAttribute('aria-label',`${DIFFICULTIES[pose.difficulty]} 난이도: ${pose.name}`);$('difficulty-label').textContent=DIFFICULTIES[pose.difficulty];}
+  for(const button of $('room-body-mode').querySelectorAll('button')){button.setAttribute('aria-pressed',String(button.dataset.value===state.bodyMode));button.disabled=!state.canChangeBodyMode;}
   const winner=state.members.find(p=>p.id===state.winner),average=state.ranking.find(p=>p.id===state.winner)?.average;
   $('game-status').textContent=winner?`${winner.name} VICTORY · 평균 ${average?.toFixed(1)}%`:state.notice;
   show('arm-game',state.phase==='lobby');$('arm-game').disabled=!state.members.some(p=>p.connected);show('reset-game',state.phase!=='lobby');$('reset-game').textContent=state.phase==='finished'?'다시 플레이 · 참가자 모집':'모집 화면으로 돌아가기';
@@ -126,16 +128,27 @@ function updateState(next){
   for(const p of sorted){
     visibleIds.add(p.id);let node=rosterNodes.get(p.id);
     if(!node){const root=document.createElement('article');root.className='person';const dot=document.createElement('span');dot.className='dot';const details=document.createElement('div');details.className='details';const name=document.createElement('div');name.className='name';const status=document.createElement('div');status.className='status';details.append(name,status);const score=document.createElement('span');score.className='score';const remove=document.createElement('button');remove.textContent='내보내기';remove.onclick=()=>host?.remove(p.id);root.append(dot,details,score,remove);node={root,name,status,score,remove};rosterNodes.set(p.id,node);$('roster').append(root);}
-    node.root.classList.toggle('ready',p.ready);node.root.classList.toggle('winner',p.id===state.winner);node.name.textContent=p.name+(p.id===memberId?' (나)':'');node.status.textContent=!p.connected?'다시 접속 대기':state.phase==='finished'?(p.id===state.winner?'VICTORY':'경기 완료'):state.suddenDeath&&!state.contenders.includes(p.id)?'결승 관전':p.ready?`${bodyLabel(state.bodyMode)} 인식 완료`:`카메라 · ${bodyLabel(state.bodyMode)} 대기`;
-    const rank=state.ranking.find(r=>r.id===p.id),score=['result','finished'].includes(state.phase)?rank?.average:p.score;node.score.textContent=Number.isFinite(score)?`${score.toFixed(1)}%`:'—';node.remove.hidden=role!=='host'||state.phase!=='lobby';
+    node.root.classList.toggle('ready',p.ready);node.root.classList.toggle('winner',p.id===state.winner||(state.intermission&&state.lastResult?.winners.includes(p.id)));node.name.textContent=p.name+(p.id===memberId?' (나)':'');node.status.textContent=!p.connected?'다시 접속 대기':state.phase==='finished'?(p.id===state.winner?'VICTORY':'경기 완료'):state.intermission?(state.lastResult?.winners.includes(p.id)?(state.lastResult.winners.length>1?'라운드 공동 1위':'라운드 승리'):'라운드 완료'):state.suddenDeath&&!state.contenders.includes(p.id)?'결승 관전':p.ready?`${bodyLabel(state.bodyMode)} 인식 완료`:`카메라 · ${bodyLabel(state.bodyMode)} 대기`;
+    const rank=state.ranking.find(r=>r.id===p.id),score=state.phase==='finished'?rank?.average:state.intermission?state.lastResult?.scores[p.id]:p.score;node.score.textContent=Number.isFinite(score)?`${score.toFixed(1)}%`:'—';node.remove.hidden=role!=='host'||state.phase!=='lobby';
     if(state.phase==='finished')$('roster').append(node.root);
   }
   for(const[id,node]of rosterNodes)if(!visibleIds.has(id)){node.root.remove();rosterNodes.delete(id);}
   updateTimer();
 }
 function updateTimer(){
-  if(!state)return;const now=Date.now()+clockOffset,active=state.phase==='playing',prepare=state.phase==='prepare';let value='5.0';if(active)value=Math.max(0,(state.end-now)/1000).toFixed(1);else if(prepare)value=String(Math.max(1,Math.ceil((state.end-now)/1000)));else if(['settling','result','finished'].includes(state.phase))value='0.0';
-  $('timer').firstChild.textContent=value+' ';show('big-count',active||prepare);$('big-count').textContent=prepare?value:value;
+  if(!state)return;
+  const now=Date.now()+clockOffset,active=state.phase==='playing',prepare=state.phase==='prepare';
+  show('big-count',active||(prepare&&!state.intermission));
+  $('big-count').textContent=active?Math.max(0,(state.end-now)/1000).toFixed(1):String(Math.max(0,Math.ceil((state.end-now)/1000)));
+  const feedback=roundFeedback(state,now);
+  show('round-result',!!feedback?.overlay);show('last-round-result',!!feedback&&state.phase==='finished');
+  if(!feedback)return;
+  if($('last-round-result').textContent!==feedback.summary)$('last-round-result').textContent=feedback.summary;
+  $('result-round').textContent=feedback.label+' 결과';
+  if($('round-winner').textContent!==feedback.title)$('round-winner').textContent=feedback.title;$('round-score').textContent=feedback.detail;
+  $('next-round-label').textContent=feedback.waiting?'다음 라운드 준비':'다음 라운드까지';
+  $('next-round-count').textContent=feedback.waiting?'인식 대기':String(feedback.countdown??'');
+  $('next-round-count').classList.toggle('recognition-wait',feedback.waiting);
 }
 async function cameraDevices(){
   try{const devices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput'),select=$('camera-device'),current=camera.stream?.getVideoTracks()[0].getSettings().deviceId;select.replaceChildren();devices.forEach((d,i)=>{const option=document.createElement('option');option.value=d.deviceId;option.textContent=d.label||`카메라 ${i+1}`;select.append(option);});if(current)select.value=current;show('camera-device',devices.length>1);}catch{}
@@ -181,8 +194,9 @@ $('local-restart').onclick=()=>{if(!local||cameraStarting)return;local.restart()
 $('create-room').onclick=createRoom;$('join-form').onsubmit=joinRoom;$('camera-start').onclick=startCamera;$('camera-stop').onclick=stopCamera;
 $('camera-aspect').onchange=()=>{if(camera.active)startCamera();};$('camera-device').onchange=()=>{if(camera.active)startCamera();};
 $('arm-game').onclick=()=>{if(host?.game.arm(Date.now())){host.broadcast();updateState(host.game.snapshot(Date.now()));}};
+for(const button of $('room-body-mode').querySelectorAll('button'))button.onclick=()=>{if(host?.game.setBodyMode(button.dataset.value,Date.now())){host.broadcast();updateState(host.game.snapshot(Date.now()));}};
 $('reset-game').onclick=()=>{if(!host)return;host.game.reset();for(const p of host.game.members.values())if(!p.connected)host.game.remove(p.id);host.broadcast();updateState(host.game.snapshot(Date.now()));};
-$('leave-room').onclick=()=>leaveRoom();$('copy-link').onclick=async()=>{const url=new URL(location.href);url.search='';url.searchParams.set('v','9');url.searchParams.set('room',code);try{await navigator.clipboard.writeText(url.href);$('copy-link').textContent='복사 완료 ✓';setTimeout(()=>{$('copy-link').textContent='초대 링크 복사';},2000);}catch{notice(`초대 주소: ${url.href}`);}};
+$('leave-room').onclick=()=>leaveRoom();$('copy-link').onclick=async()=>{const url=new URL(location.href);url.search='';url.searchParams.set('v','10');url.searchParams.set('room',code);try{await navigator.clipboard.writeText(url.href);$('copy-link').textContent='복사 완료 ✓';setTimeout(()=>{$('copy-link').textContent='초대 링크 복사';},2000);}catch{notice(`초대 주소: ${url.href}`);}};
 $('help-button').onclick=()=>$('help').showModal();$('close-help').onclick=()=>$('help').close();$('fullscreen').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{notice('이 브라우저에서는 전체 화면을 지원하지 않습니다.');}};
 $('play-gallery').onclick=async()=>{try{await $('gallery-video').play();show('play-gallery',false);}catch{notice('영상 재생을 시작하지 못했습니다. 카메라를 다시 연결해 주세요.');}};
 document.addEventListener('visibilitychange',()=>{
