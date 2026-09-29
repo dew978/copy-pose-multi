@@ -6,7 +6,7 @@ import {RoomGame} from './room-core.mjs?v=10';
 import {HostSession,PROTOCOL,roomPeerId,validCode,randomCode,send} from './room-session.mjs?v=10';
 import {OnlineCamera} from './online-camera.mjs?v=8';
 import {LocalGame} from './local-game.mjs?v=10';
-import {LocalStage} from './local-stage.mjs?v=11';
+import {LocalStage} from './local-stage.mjs?v=12';
 import {Gallery} from './gallery.mjs?v=10';
 import {roundFeedback} from './round-feedback.mjs?v=10';
 
@@ -196,7 +196,7 @@ $('camera-aspect').onchange=()=>{if(camera.active)startCamera();};$('camera-devi
 $('arm-game').onclick=()=>{if(host?.game.arm(Date.now())){host.broadcast();updateState(host.game.snapshot(Date.now()));}};
 for(const button of $('room-body-mode').querySelectorAll('button'))button.onclick=()=>{if(host?.game.setBodyMode(button.dataset.value,Date.now())){host.broadcast();updateState(host.game.snapshot(Date.now()));}};
 $('reset-game').onclick=()=>{if(!host)return;host.game.reset();for(const p of host.game.members.values())if(!p.connected)host.game.remove(p.id);host.broadcast();updateState(host.game.snapshot(Date.now()));};
-$('leave-room').onclick=()=>leaveRoom();$('copy-link').onclick=async()=>{const url=new URL(location.href);url.search='';url.searchParams.set('v','11');url.searchParams.set('room',code);try{await navigator.clipboard.writeText(url.href);$('copy-link').textContent='복사 완료 ✓';setTimeout(()=>{$('copy-link').textContent='초대 링크 복사';},2000);}catch{notice(`초대 주소: ${url.href}`);}};
+$('leave-room').onclick=()=>leaveRoom();$('copy-link').onclick=async()=>{const url=new URL(location.href);url.search='';url.searchParams.set('v','12');url.searchParams.set('room',code);try{await navigator.clipboard.writeText(url.href);$('copy-link').textContent='복사 완료 ✓';setTimeout(()=>{$('copy-link').textContent='초대 링크 복사';},2000);}catch{notice(`초대 주소: ${url.href}`);}};
 $('help-button').onclick=()=>$('help').showModal();$('close-help').onclick=()=>$('help').close();$('fullscreen').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{notice('이 브라우저에서는 전체 화면을 지원하지 않습니다.');}};
 $('play-gallery').onclick=async()=>{try{await $('gallery-video').play();show('play-gallery',false);}catch{notice('영상 재생을 시작하지 못했습니다. 카메라를 다시 연결해 주세요.');}};
 document.addEventListener('visibilitychange',()=>{
