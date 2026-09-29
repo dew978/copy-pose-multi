@@ -3,7 +3,7 @@ import {posesFor,renderPose,bodyLabel,cameraHint} from './pose-mode.mjs?v=4';
 import {MAX_PLAYERS,transportProfile,validJPEG,MAX_GALLERY_CHARS,sendPreview} from './transport-profile.mjs?v=4';
 import {PreviewEncoder} from './preview-frames.mjs?v=4';
 import {RoomGame} from './room-core.mjs?v=4';
-import {HostSession,PROTOCOL,roomPeerId,validCode,randomCode,send} from './room-session.mjs?v=4';
+import {HostSession,PROTOCOL,roomPeerId,validCode,randomCode,send} from './room-session.mjs?v=5';
 import {OnlineCamera} from './online-camera.mjs?v=4';
 import {Gallery} from './gallery.mjs?v=4';
 
@@ -18,6 +18,8 @@ const camera=new OnlineCamera($('local-video'),$('self-preview'),frame=>{
 },message=>{$('self-status').textContent=message;if(!camera.active&&!cameraStarting){show('camera-start',true);show('camera-stop',false);send(connection,{type:'camera-off'});}});
 
 function notice(message=''){$('notice').textContent=message;show('notice',!!message);}
+function choiceValue(id){return $(id).querySelector('button[aria-pressed="true"]').dataset.value;}
+for(const id of ['body-mode','rounds']){const buttons=[...$(id).querySelectorAll('button[data-value]')];for(const button of buttons)button.onclick=()=>{for(const option of buttons)option.setAttribute('aria-pressed',String(option===button));};}
 function busy(value){connecting=value;$('create-room').disabled=value;$('join-room').disabled=value;}
 function storageGet(key){try{return sessionStorage.getItem(key);}catch{return null;}}
 function storageSet(key,value){try{sessionStorage.setItem(key,value);}catch{}}
@@ -49,7 +51,7 @@ async function createRoom(){
   if(connecting)return;busy(true);notice('방을 만들고 있습니다…');const currentEpoch=++epoch;
   try{
     const nextCode=randomCode(),p=makePeer(roomPeerId(nextCode));peer=p;await openPeer(p);if(currentEpoch!==epoch){p.destroy();return;}
-    const game=new RoomGame();game.reset({rounds:Number($('rounds').value),difficulty:$('difficulty').value,bodyMode:$('body-mode').value});
+    const game=new RoomGame();game.reset({rounds:Number(choiceValue('rounds')),difficulty:$('difficulty').value,bodyMode:choiceValue('body-mode')});
     host=new HostSession({game,onChange:()=>{if(role==='host')updateState(game.snapshot(Date.now()));},onDisconnect:removeParticipantMedia,onCameraOff:removeParticipantMedia,onThumbnail:(id,jpeg,time)=>gallery.setThumbnail(id,jpeg,time),mediaReady:id=>{if(transportProfile(game.members.size).mode==='preview')return gallery.thumbnailReady(id);const video=gallery.videos.get(id);return !!video&&video.readyState>=2;}});
     enterRoom('host',nextCode);updateState(game.snapshot(Date.now()));gallery.draw(state,game.members);composite=$('gallery').captureStream(12);
     p.on('connection',c=>{console.info('Copy Pose: host received data channel');c.on('open',()=>console.info('Copy Pose: host data channel open'));host?.attach(c);});
@@ -64,7 +66,7 @@ async function createRoom(){
 }
 async function joinRoom(event){
   event.preventDefault();if(connecting)return;const nextCode=$('room-input').value.trim().toUpperCase(),name=$('name-input').value.trim();
-  if(!validCode(nextCode)){notice('8자리 방 코드를 확인해 주세요.');return;}if(!name){$('name-input').focus();return;}
+  if(!validCode(nextCode)){notice('숫자 8자리 방 코드를 확인해 주세요.');return;}if(!name){$('name-input').focus();return;}
   busy(true);notice('방에 연결하고 있습니다…');const currentEpoch=++epoch;
   token=storageGet(`copy-pose-multi:${nextCode}`)||crypto.randomUUID();storageSet(`copy-pose-multi:${nextCode}`,token);storageSet('copy-pose-multi:name',name);
   try{
@@ -160,7 +162,7 @@ $('create-room').onclick=createRoom;$('join-form').onsubmit=joinRoom;$('camera-s
 $('camera-aspect').onchange=()=>{if(camera.active)startCamera();};$('camera-device').onchange=()=>{if(camera.active)startCamera();};
 $('arm-game').onclick=()=>{if(host?.game.arm(Date.now())){host.broadcast();updateState(host.game.snapshot(Date.now()));}};
 $('reset-game').onclick=()=>{if(!host)return;host.game.reset();for(const p of host.game.members.values())if(!p.connected)host.game.remove(p.id);host.broadcast();updateState(host.game.snapshot(Date.now()));};
-$('leave-room').onclick=()=>leaveRoom();$('copy-link').onclick=async()=>{const url=new URL(location.href);url.search='';url.searchParams.set('v','4');url.searchParams.set('room',code);try{await navigator.clipboard.writeText(url.href);$('copy-link').textContent='복사 완료 ✓';setTimeout(()=>{$('copy-link').textContent='초대 링크 복사';},2000);}catch{notice(`초대 주소: ${url.href}`);}};
+$('leave-room').onclick=()=>leaveRoom();$('copy-link').onclick=async()=>{const url=new URL(location.href);url.search='';url.searchParams.set('v','5');url.searchParams.set('room',code);try{await navigator.clipboard.writeText(url.href);$('copy-link').textContent='복사 완료 ✓';setTimeout(()=>{$('copy-link').textContent='초대 링크 복사';},2000);}catch{notice(`초대 주소: ${url.href}`);}};
 $('help-button').onclick=()=>$('help').showModal();$('close-help').onclick=()=>$('help').close();$('fullscreen').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{notice('이 브라우저에서는 전체 화면을 지원하지 않습니다.');}};
 $('play-gallery').onclick=async()=>{try{await $('gallery-video').play();show('play-gallery',false);}catch{notice('영상 재생을 시작하지 못했습니다. 카메라를 다시 연결해 주세요.');}};
 document.addEventListener('visibilitychange',()=>{

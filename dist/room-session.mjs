@@ -2,8 +2,12 @@ import {RoomGame,MAX_PLAYERS} from './room-core.mjs?v=4';
 import {validJPEG,transportProfile,sendPreview,compactState} from './transport-profile.mjs?v=4';
 export const PROTOCOL=2;
 export const roomPeerId=code=>`copy-pose-multi-${code}`;
-export const validCode=code=>/^[A-Z2-9]{8}$/.test(code);
-export function randomCode(){const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';return [...crypto.getRandomValues(new Uint8Array(8))].map(n=>alphabet[n%32]).join('');}
+export const validCode=code=>/^[0-9]{8}$/.test(code);
+export function randomCode(){
+  let code='';const bytes=new Uint8Array(16);
+  while(code.length<8){crypto.getRandomValues(bytes);for(const n of bytes){if(n<250)code+=String(n%10);if(code.length===8)break;}}
+  return code;
+}
 export function send(connection,message){if(connection?.open&&(!connection.dataChannel||connection.dataChannel.bufferedAmount<131072))try{connection.send(message);return true;}catch{}return false;}
 
 // The host owns roster, scoring and timing. A reconnect token never appears in
