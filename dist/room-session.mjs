@@ -12,6 +12,7 @@ export class HostSession{
   attach(connection){
     if(this.closed||this.pending.size>=16){connection.close();return;}
     const entry={connection,id:null,lastMessage:this.now(),lastFrame:0};this.pending.add(entry);
+    connection.on('open',()=>{entry.lastMessage=this.now();});
     connection.on('data',data=>{
       if(this.closed||entry.rejected||!data||typeof data!=='object'||Array.isArray(data))return;
       const now=this.now();entry.lastMessage=now;
@@ -39,6 +40,6 @@ export class HostSession{
   acceptCall(call){const entry=[...this.connections.values()].find(e=>e.connection.peer===call.peer);return entry&&call.metadata?.memberId===entry.id&&call.metadata?.token===entry.token?entry.id:null;}
   remove(id){const entry=this.connections.get(id);this.game.remove(id);if(entry){send(entry.connection,{type:'reject',message:'호스트가 참가자 목록에서 내보냈습니다.'});this.connections.delete(id);this.tokens.delete(entry.token);this.onDisconnect(id);setTimeout(()=>entry.connection.close(),200);}this.onChange();}
   broadcast(){const message={type:'state',state:this.game.snapshot(this.now())};for(const{connection}of this.connections.values())send(connection,message);}
-  tick(){const now=this.now();for(const e of [...this.pending])if(now-e.lastMessage>8000){this.pending.delete(e);e.connection.close();}for(const e of [...this.connections.values()])if(now-e.lastMessage>12000){this.detach(e);e.connection.close();}this.game.tick(now);}
+  tick(){const now=this.now();for(const e of [...this.pending])if(now-e.lastMessage>(e.connection.open?8000:35000)){this.pending.delete(e);e.connection.close();}for(const e of [...this.connections.values()])if(now-e.lastMessage>12000){this.detach(e);e.connection.close();}this.game.tick(now);}
   close(){this.closed=true;for(const e of [...this.connections.values(),...this.pending]){send(e.connection,{type:'closed'});e.connection.close();}this.pending.clear();this.connections.clear();this.tokens.clear();}
 }

@@ -1,6 +1,6 @@
 import {POSES,DIFFICULTIES,poseSVG} from './game-core.mjs';
 import {RoomGame} from './room-core.mjs';
-import {HostSession,PROTOCOL,roomPeerId,validCode,randomCode,send} from './room-session.mjs';
+import {HostSession,PROTOCOL,roomPeerId,validCode,randomCode,send} from './room-session.mjs?v=3';
 import {OnlineCamera} from './online-camera.mjs';
 import {Gallery} from './gallery.mjs';
 
