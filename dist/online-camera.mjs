@@ -1,8 +1,8 @@
-import {requestCameraStream,attachCameraVideo} from './camera-utils.mjs';
-import {assignPlayers,CONNECTIONS} from './game-core.mjs';
-import {createPoseModel} from './model-loader.mjs';
+import {requestCameraStream,attachCameraVideo} from './camera-utils.mjs?v=4';
+import {selectPose,maskLandmarks,connectionsFor,cameraHint} from './pose-mode.mjs?v=4';
+import {createPoseModel} from './model-loader.mjs?v=4';
 export class OnlineCamera{
-  constructor(video,preview,onFrame,onStatus){this.video=video;this.preview=preview;this.onFrame=onFrame;this.onStatus=onStatus;this.epoch=0;this.active=false;this.output=document.createElement('canvas');this.output.width=480;this.output.height=360;}
+  constructor(video,preview,onFrame,onStatus){this.video=video;this.preview=preview;this.onFrame=onFrame;this.onStatus=onStatus;this.epoch=0;this.active=false;this.bodyMode='full';this.output=document.createElement('canvas');this.output.width=480;this.output.height=360;}
   async start(aspect,deviceId=''){
     this.stop();const epoch=this.epoch;this.onStatus('카메라 연결 중…');
     const current=()=>epoch===this.epoch;
@@ -21,13 +21,13 @@ export class OnlineCamera{
         if(!current())return;this.worker?.terminate();this.worker=null;
         const model=await createPoseModel(this.onStatus);if(!current()){model.close();return;}this.model=model;
       }
-      this.onStatus('머리부터 발끝까지 보여 주세요');this.timer=setInterval(()=>this.detect(),90);return this.shareStream;
+      this.onStatus(cameraHint(this.bodyMode));this.timer=setInterval(()=>this.detect(),90);return this.shareStream;
     }catch(error){if(current())this.stop();throw error;}
   }
   accept(landmarks,timestamp){
     if(performance.now()-timestamp>800)return;
-    this.errors=0;const p=assignPlayers(landmarks,this.video.videoWidth,this.video.videoHeight,1)[0];
-    this.raw=p?.raw||null;this.lastPose=performance.now();
+    this.errors=0;const raw=selectPose(landmarks,this.bodyMode);
+    this.raw=maskLandmarks(raw,this.bodyMode);this.lastPose=performance.now();
     this.onFrame({raw:this.raw,width:this.video.videoWidth,height:this.video.videoHeight,visible:!document.hidden,time:Date.now()-(performance.now()-timestamp)});
   }
   async detect(){
@@ -42,7 +42,7 @@ export class OnlineCamera{
     if(!this.active)return;
     const {width:w,height:h}=this.output,c=this.output.getContext('2d');c.drawImage(this.video,0,0,w,h);
     const p=this.preview.getContext('2d');p.save();p.translate(w,0);p.scale(-1,1);p.drawImage(this.video,0,0,w,h);p.restore();
-    if(this.raw&&performance.now()-this.lastPose<800){p.strokeStyle='#d9ff58';p.lineWidth=3;p.lineCap='round';for(const[a,b]of CONNECTIONS){const A=this.raw[a],B=this.raw[b];if(!A||!B||A.visibility<.5||B.visibility<.5)continue;p.beginPath();p.moveTo((1-A.x)*w,A.y*h);p.lineTo((1-B.x)*w,B.y*h);p.stroke();}}
+    if(this.raw&&performance.now()-this.lastPose<800){p.strokeStyle='#d9ff58';p.lineWidth=3;p.lineCap='round';for(const[a,b]of connectionsFor(this.bodyMode)){const A=this.raw[a],B=this.raw[b];if(!A||!B||A.visibility<.5||B.visibility<.5)continue;p.beginPath();p.moveTo((1-A.x)*w,A.y*h);p.lineTo((1-B.x)*w,B.y*h);p.stroke();}}
     this.drawTimer=setTimeout(()=>this.draw(),80);
   }
   stop(){this.epoch++;this.active=false;clearInterval(this.timer);clearTimeout(this.drawTimer);this.worker?.terminate();this.worker=null;this.model?.close();this.model=null;this.stream?.getTracks().forEach(t=>t.stop());this.shareStream?.getTracks().forEach(t=>t.stop());this.stream=null;this.shareStream=null;this.video.srcObject=null;this.raw=null;this.busy=false;this.lastTime=-1;this.errors=0;this.preview.getContext('2d').clearRect(0,0,this.preview.width,this.preview.height);}
