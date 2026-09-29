@@ -19,7 +19,8 @@ function storageGet(key){try{return sessionStorage.getItem(key);}catch{return nu
 function storageSet(key,value){try{sessionStorage.setItem(key,value);}catch{}}
 function makePeer(id){
   if(!globalThis.Peer)throw new Error('연결 모듈을 불러오지 못했습니다. 페이지를 새로고침해 주세요.');
-  return new Peer(id,{debug:0,secure:true,config:{iceServers:[{urls:'stun:stun.l.google.com:19302'}]}});
+  // PeerJS includes its public STUN/TURN defaults for networks that need relay.
+  return new Peer(id,{debug:0,secure:true});
 }
 function openPeer(p){return new Promise((resolve,reject)=>{
   const timeout=setTimeout(()=>{p.destroy();reject(new Error('방 연결 시간이 초과되었습니다. 네트워크를 확인해 주세요.'));},15000);
@@ -35,7 +36,7 @@ function leaveRoom(message=''){
   for(const node of rosterNodes.values())node.root.remove();rosterNodes.clear();
 }
 function handlePeerErrors(p,currentEpoch){
-  p.on('error',error=>{if(currentEpoch!==epoch)return;if(error.type==='peer-unavailable')notice('방을 찾을 수 없습니다. 코드를 확인하고 호스트가 이 페이지를 열어 두었는지 확인해 주세요.');else notice('연결 상태가 불안정합니다. 계속되지 않으면 다시 입장해 주세요.');});
+  p.on('error',error=>{console.warn('Copy Pose connection:',error.type);if(currentEpoch!==epoch)return;if(error.type==='peer-unavailable')notice('방을 찾을 수 없습니다. 코드를 확인하고 호스트가 이 페이지를 열어 두었는지 확인해 주세요.');else notice('연결 상태가 불안정합니다. 계속되지 않으면 다시 입장해 주세요.');});
   p.on('disconnected',()=>{if(currentEpoch!==epoch)return;notice('연결 서버와 다시 연결하고 있습니다…');try{p.reconnect();}catch{}});
   p.on('open',()=>{if(currentEpoch===epoch)notice();});
 }
@@ -46,7 +47,7 @@ async function createRoom(){
     const game=new RoomGame();game.reset({rounds:Number($('rounds').value),difficulty:$('difficulty').value});
     host=new HostSession({game,onChange:()=>{if(role==='host')updateState(game.snapshot(Date.now()));},onDisconnect:closeMedia,mediaReady:id=>{const video=gallery.videos.get(id);return !!video&&video.readyState>=2;}});
     enterRoom('host',nextCode);updateState(game.snapshot(Date.now()));gallery.draw(state,game.members);composite=$('gallery').captureStream(12);
-    p.on('connection',c=>host?.attach(c));
+    p.on('connection',c=>{console.info('Copy Pose: host received data channel');c.on('open',()=>console.info('Copy Pose: host data channel open'));host?.attach(c);});
     p.on('call',call=>{
       const id=host?.acceptCall(call);if(!id||!composite){call.close();return;}closeMedia(id);calls.set(id,call);
       call.on('stream',stream=>{if(calls.get(id)===call)gallery.setVideo(id,stream);});
@@ -66,7 +67,7 @@ async function joinRoom(event){
     const c=p.connect(roomPeerId(nextCode),{reliable:true,serialization:'json'});connection=c;
     const welcome=await new Promise((resolve,reject)=>{
       const timeout=setTimeout(()=>reject(new Error('방에 연결하지 못했습니다. 호스트의 방 코드와 네트워크를 확인해 주세요.')),16000);
-      c.on('open',()=>send(c,{type:'hello',version:PROTOCOL,name,token}));
+      c.on('open',()=>{console.info('Copy Pose: player data channel open');send(c,{type:'hello',version:PROTOCOL,name,token});});
       c.on('data',data=>{
         if(currentEpoch!==epoch||!data||typeof data!=='object')return;
         lastHostSeen=Date.now();
