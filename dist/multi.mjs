@@ -4,23 +4,28 @@ import {MAX_PLAYERS,transportProfile,validJPEG,MAX_GALLERY_CHARS,sendPreview} fr
 import {PreviewEncoder} from './preview-frames.mjs?v=4';
 import {RoomGame} from './room-core.mjs?v=4';
 import {HostSession,PROTOCOL,roomPeerId,validCode,randomCode,send} from './room-session.mjs?v=5';
-import {OnlineCamera} from './online-camera.mjs?v=4';
+import {OnlineCamera} from './online-camera.mjs?v=8';
+import {LocalGame} from './local-game.mjs?v=8';
+import {LocalStage} from './local-stage.mjs?v=8';
 import {Gallery} from './gallery.mjs?v=4';
 
 const $=id=>document.getElementById(id),show=(id,visible)=>$(id).classList.toggle('hidden',!visible);
 const phaseNames={lobby:'모집 중',waiting:'인식 대기',prepare:'곧 시작',playing:'포즈 맞추기',settling:'점수 계산',result:'라운드 결과',finished:'최종 결과'};
-let role=null,peer=null,connection=null,host=null,state=null,code='',memberId=null,token='',clockOffset=0,bestRtt=Infinity,epoch=0,lastHostSeen=0,mediaCall=null,mediaTimer=null,composite=null,lastBroadcast=0,lastPing=0,poseIndex=-1,connecting=false,cameraStarting=false,transportMode=null,lastThumbnail=0,lastGallery=0,receivedGallery=0,lastGallerySequence=0;
+let local=null,role=null,peer=null,connection=null,host=null,state=null,code='',memberId=null,token='',clockOffset=0,bestRtt=Infinity,epoch=0,lastHostSeen=0,mediaCall=null,mediaTimer=null,composite=null,lastBroadcast=0,lastPing=0,poseIndex=-1,connecting=false,cameraStarting=false,transportMode=null,lastThumbnail=0,lastGallery=0,receivedGallery=0,lastGallerySequence=0;
 const calls=new Map(),rosterNodes=new Map(),gallery=new Gallery($('gallery'));
+const localStage=new LocalStage($('gallery'));
 const thumbnailEncoder=new PreviewEncoder(),galleryEncoder=new PreviewEncoder();
 const camera=new OnlineCamera($('local-video'),$('self-preview'),frame=>{
   if(role!=='player'||!connection?.open)return;
   send(connection,{type:'frame',frame:{...frame,time:frame.time+clockOffset,token:state?.token,raw:frame.raw?.map(p=>p?{x:p.x,y:p.y,visibility:p.visibility??0}:null)||null}});
-},message=>{$('self-status').textContent=message;if(!camera.active&&!cameraStarting){show('camera-start',true);show('camera-stop',false);send(connection,{type:'camera-off'});}});
+},message=>{$('self-status').textContent=message;if(!camera.active&&!cameraStarting){if(role==='local'){local?.pause();notice(message);}show('camera-start',true);show('camera-stop',false);send(connection,{type:'camera-off'});}});
+
+camera.onPoses=frame=>{if(role==='local')local?.receive(frame);};
 
 function notice(message=''){$('notice').textContent=message;show('notice',!!message);}
 function choiceValue(id){return $(id).querySelector('button[aria-pressed="true"]').dataset.value;}
 for(const id of ['body-mode','rounds']){const buttons=[...$(id).querySelectorAll('button[data-value]')];for(const button of buttons)button.onclick=()=>{for(const option of buttons)option.setAttribute('aria-pressed',String(option===button));};}
-function busy(value){connecting=value;$('create-room').disabled=value;$('join-room').disabled=value;}
+function busy(value){connecting=value;$('create-room').disabled=value;$('join-room').disabled=value;$('quick-start').disabled=value;}
 function storageGet(key){try{return sessionStorage.getItem(key);}catch{return null;}}
 function storageSet(key,value){try{sessionStorage.setItem(key,value);}catch{}}
 function makePeer(id){
@@ -33,19 +38,31 @@ function openPeer(p){return new Promise((resolve,reject)=>{
   const fail=error=>{clearTimeout(timeout);p.destroy();reject(new Error(error.type==='unavailable-id'?'방 코드가 겹쳤습니다. 방 만들기를 다시 눌러 주세요.':'연결 서버에 접속하지 못했습니다. 네트워크를 확인해 주세요.'));};
   p.once('open',()=>{clearTimeout(timeout);p.off('error',fail);resolve();});p.once('error',fail);
 });}
-function enterRoom(nextRole,nextCode){role=nextRole;code=nextCode;show('entry',false);show('room',true);$('room-code').textContent=code;$('role-label').textContent=role==='host'?'HOST':'PLAYER';show('host-controls',role==='host');show('player-controls',role==='player');show('gallery',role==='host');show('gallery-video',role==='player');show('gallery-preview',false);show('gallery-placeholder',role==='player');notice();const url=new URL(location.href);url.searchParams.set('room',code);history.replaceState(null,'',url);}
+function enterRoom(nextRole,nextCode){
+  role=nextRole;code=nextCode;const isLocal=role==='local';
+  show('entry',false);show('room',true);$('room').classList.toggle('local-play',isLocal);$('room').classList.toggle('solo-play',isLocal&&local.playerCount===1);
+  $('room-code').textContent=code;$('role-label').textContent=isLocal?(local.playerCount===1?'1인 연습':'2인 대결'):role==='host'?'HOST':'PLAYER';
+  show('room-share',!isLocal);show('host-controls',role==='host');show('player-controls',role==='player'||isLocal);show('gallery',role==='host'||isLocal);show('gallery-video',role==='player');show('gallery-preview',false);show('gallery-placeholder',role==='player');show('local-restart',isLocal);
+  $('camera-privacy').textContent=isLocal?'영상과 자세 정보는 이 기기 안에서만 처리됩니다.':'영상과 자세 정보가 같은 방에 실시간 공유됩니다. 녹화·음성 전송은 하지 않습니다.';
+  $('camera-start').textContent='카메라 켜고 참여';notice();const url=new URL(location.href);if(isLocal)url.searchParams.delete('room');else url.searchParams.set('room',code);history.replaceState(null,'',url);
+}
 function closeMedia(id){const call=calls.get(id);calls.delete(id);call?.close();gallery.removeVideo(id);}
 function removeParticipantMedia(id){closeMedia(id);gallery.removeThumbnail(id);}
 function leaveRoom(message=''){
-  epoch++;role=null;cameraStarting=false;clearTimeout(mediaTimer);send(connection,{type:'bye'});camera.stop();mediaCall?.close();mediaCall=null;
+  epoch++;role=null;localStage.stop();local=null;cameraStarting=false;clearTimeout(mediaTimer);send(connection,{type:'bye'});camera.stop();mediaCall?.close();mediaCall=null;
   host?.close();host=null;for(const id of calls.keys())closeMedia(id);gallery.close();composite?.getTracks().forEach(t=>t.stop());composite=null;connection?.close();connection=null;peer?.destroy();peer=null;state=null;memberId=null;poseIndex=-1;transportMode=null;receivedGallery=0;lastGallerySequence++;$('gallery-preview').removeAttribute('src');clockOffset=0;bestRtt=Infinity;
   $('gallery-video').srcObject=null;show('room',false);show('entry',true);show('camera-start',true);show('camera-stop',false);$('camera-start').disabled=false;show('play-gallery',false);$('role-label').textContent='1–30 PLAYERS';busy(false);notice(message);
-  for(const node of rosterNodes.values())node.root.remove();rosterNodes.clear();
+  for(const node of rosterNodes.values())node.root.remove();rosterNodes.clear();const url=new URL(location.href);url.searchParams.delete('room');history.replaceState(null,'',url);
 }
 function handlePeerErrors(p,currentEpoch){
   p.on('error',error=>{console.warn('Copy Pose connection:',error.type);if(currentEpoch!==epoch)return;if(error.type==='peer-unavailable')notice('방을 찾을 수 없습니다. 코드를 확인하고 호스트가 이 페이지를 열어 두었는지 확인해 주세요.');else notice('연결 상태가 불안정합니다. 계속되지 않으면 다시 입장해 주세요.');});
   p.on('disconnected',()=>{if(currentEpoch!==epoch)return;notice('연결 서버와 다시 연결하고 있습니다…');try{p.reconnect();}catch{}});
   p.on('open',()=>{if(currentEpoch===epoch)notice();});
+}
+function createLocal(playerCount){
+  if(connecting)return;$('local-setup').close();epoch++;
+  local=new LocalGame({playerCount,rounds:Number(choiceValue('rounds')),difficulty:$('difficulty').value,bodyMode:choiceValue('body-mode')});
+  enterRoom('local','');updateState(local.game.snapshot(Date.now()));localStage.start(local.game,$('local-video'));startCamera();
 }
 async function createRoom(){
   if(connecting)return;busy(true);notice('방을 만들고 있습니다…');const currentEpoch=++epoch;
@@ -94,15 +111,15 @@ async function joinRoom(event){
 function updateState(next){
   if(!next||!Array.isArray(next.members)||next.members.length>MAX_PLAYERS||!['full','upper'].includes(next.bodyMode)||!posesFor(next.bodyMode)[next.poseIndex])return;
   state=next;camera.bodyMode=state.bodyMode;applyTransport();$('mode-label').textContent=bodyLabel(state.bodyMode);$('room').classList.toggle('many-players',state.members.length>8);
-  $('phase-label').textContent=phaseNames[state.phase]||'';$('round-label').textContent=state.suddenDeath?'TIE BREAK':`Round ${state.round} / ${state.totalRounds}`;$('member-count').textContent=`${state.members.length} / ${MAX_PLAYERS}`;
+  $('phase-label').textContent=phaseNames[state.phase]||'';$('round-label').textContent=state.suddenDeath?'TIE BREAK':`Round ${state.round} / ${state.totalRounds}`;$('member-count').textContent=role==='local'?(local.playerCount===1?'1인 연습':'2인 대결'):`${state.members.length} / ${MAX_PLAYERS}`;
   if(poseIndex!==`${state.bodyMode}:${state.poseIndex}`){poseIndex=`${state.bodyMode}:${state.poseIndex}`;const pose=posesFor(state.bodyMode)[state.poseIndex];$('pose-picture').innerHTML=renderPose(pose);$('pose-picture').setAttribute('aria-label',`${DIFFICULTIES[pose.difficulty]} 난이도: ${pose.name}`);$('pose-name').textContent=pose.name;$('difficulty-label').textContent=DIFFICULTIES[pose.difficulty];}
   const winner=state.members.find(p=>p.id===state.winner),average=state.ranking.find(p=>p.id===state.winner)?.average;
   $('game-status').textContent=winner?`${winner.name} VICTORY · 평균 ${average?.toFixed(1)}%`:state.notice;
   show('arm-game',state.phase==='lobby');$('arm-game').disabled=!state.members.some(p=>p.connected);show('reset-game',state.phase!=='lobby');$('reset-game').textContent=state.phase==='finished'?'다시 플레이 · 참가자 모집':'모집 화면으로 돌아가기';
   $('host-note').textContent=state.phase==='lobby'?`참가자를 확정하면 전원 ${bodyLabel(state.bodyMode)} 인식 후 자동 시작합니다.`:state.phase==='finished'?'새 경기에서 라운드와 포즈는 동일하게 유지됩니다.':'호스트는 이 탭을 화면에 열어 두세요.';
-  if(role==='player'){
+  if(role==='player'||role==='local'){
     const self=state.members.find(p=>p.id===memberId);
-    if(camera.active&&!cameraStarting)$('self-status').textContent=self?.ready?`${bodyLabel(state.bodyMode)} 인식 완료 ✓`:cameraHint(state.bodyMode);
+    if(camera.active&&!cameraStarting)$('self-status').textContent=(role==='local'?state.members.every(p=>p.ready):self?.ready)?`${bodyLabel(state.bodyMode)} 인식 완료 ✓`:cameraHint(state.bodyMode);
     const locked=['prepare','playing','settling'].includes(state.phase);$('camera-aspect').disabled=locked||cameraStarting;$('camera-device').disabled=locked||cameraStarting;
   }
   const visibleIds=new Set();const sorted=state.phase==='finished'?[...state.members].sort((a,b)=>a.id===state.winner?-1:b.id===state.winner?1:(state.ranking.find(p=>p.id===b.id)?.average??0)-(state.ranking.find(p=>p.id===a.id)?.average??0)):state.members;
@@ -124,6 +141,7 @@ async function cameraDevices(){
   try{const devices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput'),select=$('camera-device'),current=camera.stream?.getVideoTracks()[0].getSettings().deviceId;select.replaceChildren();devices.forEach((d,i)=>{const option=document.createElement('option');option.value=d.deviceId;option.textContent=d.label||`카메라 ${i+1}`;select.append(option);});if(current)select.value=current;show('camera-device',devices.length>1);}catch{}
 }
 function applyTransport(){
+  if(role==='local'){transportMode='local';$('preview-note').textContent='카메라 1대 · '+(local.playerCount===1?'1인 연습':'화면 왼쪽 PLAYER 1 · 오른쪽 PLAYER 2');return;}
   const next=transportProfile(state.members.length).mode;if(next===transportMode)return;transportMode=next;lastThumbnail=0;lastGallery=0;receivedGallery=0;lastGallerySequence++;
   if(role==='host'&&next==='preview'){for(const id of calls.keys())closeMedia(id);}
   if(role==='player'){
@@ -144,10 +162,10 @@ function startMediaShare(){
   mediaTimer=setTimeout(()=>{if(mediaCall===call){notice('영상 연결이 지연되고 있습니다. 다른 네트워크에서 다시 연결해 주세요.');show('camera-start',true);$('camera-start').textContent='카메라 다시 연결';}},35000);
 }
 async function startCamera(){
-  if(role!=='player'||cameraStarting)return;
+  if(!['player','local'].includes(role)||cameraStarting)return;
   if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia){notice('카메라를 사용하려면 HTTPS 주소를 Chrome 또는 Safari에서 열어 주세요.');return;}
   const currentEpoch=epoch;cameraStarting=true;$('camera-start').disabled=true;notice();
-  const old=mediaCall;mediaCall=null;old?.close();clearTimeout(mediaTimer);send(connection,{type:'camera-off'});camera.bodyMode=state.bodyMode;
+  const old=mediaCall;mediaCall=null;old?.close();clearTimeout(mediaTimer);send(connection,{type:'camera-off'});local?.pause();camera.bodyMode=state.bodyMode;camera.numPoses=role==='local'?local.playerCount:1;camera.shareVideo=role==='player';
   try{
     await camera.start($('camera-aspect').value,$('camera-device').value);if(currentEpoch!==epoch||!camera.active)return;
     if(transportMode==='video')startMediaShare();lastThumbnail=0;
@@ -156,22 +174,25 @@ async function startCamera(){
     if(currentEpoch===epoch){camera.stop();const messages={NotAllowedError:'카메라 권한을 허용한 뒤 다시 눌러 주세요.',NotFoundError:'연결된 카메라가 없습니다.',NotReadableError:'다른 앱이 카메라를 사용 중인지 확인해 주세요.'};notice(messages[error.name]||'카메라 또는 자세 인식을 시작하지 못했습니다. 네트워크를 확인하고 다시 눌러 주세요.');show('camera-start',true);show('camera-stop',false);}
   }finally{if(currentEpoch===epoch){cameraStarting=false;$('camera-start').disabled=false;}}
 }
-function stopCamera(){clearTimeout(mediaTimer);send(connection,{type:'camera-off'});const call=mediaCall;mediaCall=null;call?.close();camera.stop();if(transportMode==='video'){$('gallery-video').srcObject=null;show('gallery-placeholder',true);}show('camera-start',true);show('camera-stop',false);$('self-status').textContent='카메라 OFF';$('camera-start').textContent='카메라 켜고 참여';}
+function stopCamera(){local?.pause();clearTimeout(mediaTimer);send(connection,{type:'camera-off'});const call=mediaCall;mediaCall=null;call?.close();camera.stop();if(transportMode==='video'){$('gallery-video').srcObject=null;show('gallery-placeholder',true);}show('camera-start',true);show('camera-stop',false);$('self-status').textContent='카메라 OFF';$('camera-start').textContent='카메라 켜고 참여';}
 
+$('quick-start').onclick=()=>$('local-setup').showModal();$('close-local-setup').onclick=()=>$('local-setup').close();$('local-solo').onclick=()=>createLocal(1);$('local-duel').onclick=()=>createLocal(2);
+$('local-restart').onclick=()=>{if(!local||cameraStarting)return;local.restart();updateState(local.game.snapshot(Date.now()));if(!camera.active)startCamera();};
 $('create-room').onclick=createRoom;$('join-form').onsubmit=joinRoom;$('camera-start').onclick=startCamera;$('camera-stop').onclick=stopCamera;
 $('camera-aspect').onchange=()=>{if(camera.active)startCamera();};$('camera-device').onchange=()=>{if(camera.active)startCamera();};
 $('arm-game').onclick=()=>{if(host?.game.arm(Date.now())){host.broadcast();updateState(host.game.snapshot(Date.now()));}};
 $('reset-game').onclick=()=>{if(!host)return;host.game.reset();for(const p of host.game.members.values())if(!p.connected)host.game.remove(p.id);host.broadcast();updateState(host.game.snapshot(Date.now()));};
-$('leave-room').onclick=()=>leaveRoom();$('copy-link').onclick=async()=>{const url=new URL(location.href);url.search='';url.searchParams.set('v','7');url.searchParams.set('room',code);try{await navigator.clipboard.writeText(url.href);$('copy-link').textContent='복사 완료 ✓';setTimeout(()=>{$('copy-link').textContent='초대 링크 복사';},2000);}catch{notice(`초대 주소: ${url.href}`);}};
+$('leave-room').onclick=()=>leaveRoom();$('copy-link').onclick=async()=>{const url=new URL(location.href);url.search='';url.searchParams.set('v','8');url.searchParams.set('room',code);try{await navigator.clipboard.writeText(url.href);$('copy-link').textContent='복사 완료 ✓';setTimeout(()=>{$('copy-link').textContent='초대 링크 복사';},2000);}catch{notice(`초대 주소: ${url.href}`);}};
 $('help-button').onclick=()=>$('help').showModal();$('close-help').onclick=()=>$('help').close();$('fullscreen').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{notice('이 브라우저에서는 전체 화면을 지원하지 않습니다.');}};
 $('play-gallery').onclick=async()=>{try{await $('gallery-video').play();show('play-gallery',false);}catch{notice('영상 재생을 시작하지 못했습니다. 카메라를 다시 연결해 주세요.');}};
 document.addEventListener('visibilitychange',()=>{
-  if(document.hidden){send(connection,{type:'camera-off'});if(host&&['prepare','playing','settling'].includes(host.game.phase)){host.game.retry('호스트가 돌아오면 같은 라운드로 재도전합니다');host.broadcast();}}
+  if(document.hidden){local?.pause();send(connection,{type:'camera-off'});if(host&&['prepare','playing','settling'].includes(host.game.phase)){host.game.retry('호스트가 돌아오면 같은 라운드로 재도전합니다');host.broadcast();}}
 });
 window.addEventListener('pagehide',()=>leaveRoom());
 setInterval(()=>{
   const now=Date.now();
-  if(role==='host'&&host){if(!document.hidden)host.tick();if(now-lastBroadcast>=transportProfile(host.game.members.size).stateInterval){lastBroadcast=now;host.broadcast();updateState(host.game.snapshot(now));}gallery.draw(host.game.snapshot(now),host.game.members,now);if(transportMode==='preview'&&!document.hidden&&now-lastGallery>=1000){lastGallery=now;const jpeg=galleryEncoder.gallery($('gallery'));if(jpeg)host.broadcastPreview(jpeg);}}
+  if(role==='local'&&local){if(!document.hidden)local.game.tick(now);updateState(local.game.snapshot(now));}
+  else if(role==='host'&&host){if(!document.hidden)host.tick();if(now-lastBroadcast>=transportProfile(host.game.members.size).stateInterval){lastBroadcast=now;host.broadcast();updateState(host.game.snapshot(now));}gallery.draw(host.game.snapshot(now),host.game.members,now);if(transportMode==='preview'&&!document.hidden&&now-lastGallery>=1000){lastGallery=now;const jpeg=galleryEncoder.gallery($('gallery'));if(jpeg)host.broadcastPreview(jpeg);}}
   else if(role==='player'){if(now-lastHostSeen>16000){leaveRoom('호스트 응답이 없습니다. 호스트가 방을 열고 있는지 확인한 후 다시 입장해 주세요.');return;}if(now-lastPing>2000){lastPing=now;send(connection,{type:'ping',t0:now});}if(transportMode==='preview'&&camera.active&&!cameraStarting&&!document.hidden&&now-lastThumbnail>=1000){lastThumbnail=now;const jpeg=thumbnailEncoder.encode(camera.output,240,180);if(jpeg)sendPreview(connection,{type:'thumbnail',jpeg});}if(transportMode==='preview'&&receivedGallery&&now-receivedGallery>5000){show('gallery-placeholder',true);$('gallery-placeholder').textContent='전체 미리보기 연결을 기다리고 있습니다…';}updateTimer();}
 },80);
 

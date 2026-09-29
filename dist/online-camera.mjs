@@ -1,8 +1,8 @@
 import {requestCameraStream,attachCameraVideo} from './camera-utils.mjs?v=4';
 import {selectPose,maskLandmarks,connectionsFor,cameraHint} from './pose-mode.mjs?v=4';
-import {createPoseModel} from './model-loader.mjs?v=4';
+import {createPoseModel} from './model-loader.mjs?v=8';
 export class OnlineCamera{
-  constructor(video,preview,onFrame,onStatus){this.video=video;this.preview=preview;this.onFrame=onFrame;this.onStatus=onStatus;this.epoch=0;this.active=false;this.bodyMode='full';this.output=document.createElement('canvas');this.output.width=480;this.output.height=360;}
+  constructor(video,preview,onFrame,onStatus){this.video=video;this.preview=preview;this.onFrame=onFrame;this.onStatus=onStatus;this.epoch=0;this.active=false;this.bodyMode='full';this.numPoses=1;this.shareVideo=true;this.onPoses=null;this.output=document.createElement('canvas');this.output.width=480;this.output.height=360;}
   async start(aspect,deviceId=''){
     this.stop();const epoch=this.epoch;this.onStatus('카메라 연결 중…');
     const current=()=>epoch===this.epoch;
@@ -10,16 +10,16 @@ export class OnlineCamera{
       this.stream=await requestCameraStream(navigator.mediaDevices,{aspect,deviceId,isCurrent:current});
       await attachCameraVideo(this.video,this.stream);if(!current())return;
       this.active=true;this.output.height=Math.round(480*this.video.videoHeight/this.video.videoWidth);this.preview.width=480;this.preview.height=this.output.height;
-      this.shareStream=this.output.captureStream(12);this.draw();this.onStatus('자세 인식 준비 중…');
+      this.shareStream=this.shareVideo?this.output.captureStream(12):null;this.draw();this.onStatus('자세 인식 준비 중…');
       this.stream.getVideoTracks()[0].addEventListener('ended',()=>{if(current()){this.stop();this.onStatus('카메라 연결이 끊겼습니다. 다시 켜 주세요.');}});
       try{
-        const worker=new Worker(new URL('./online-worker.js',import.meta.url));this.worker=worker;
-        await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('timeout')),25000);worker.onerror=()=>{clearTimeout(timeout);reject(new Error('worker'));};worker.onmessage=({data})=>{if(data.type==='ready'){clearTimeout(timeout);resolve();}else if(data.type==='error'){clearTimeout(timeout);reject(new Error(data.message));}};worker.postMessage({type:'init'});});
+        const worker=new Worker(new URL('./online-worker.js?v=8',import.meta.url));this.worker=worker;
+        await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('timeout')),25000);worker.onerror=()=>{clearTimeout(timeout);reject(new Error('worker'));};worker.onmessage=({data})=>{if(data.type==='ready'){clearTimeout(timeout);resolve();}else if(data.type==='error'){clearTimeout(timeout);reject(new Error(data.message));}};worker.postMessage({type:'init',numPoses:this.numPoses});});
         if(!current())return;
         worker.onmessage=({data})=>{if(!current())return;this.busy=false;if(data.type==='poses'){this.accept(data.landmarks,data.timestamp);}else if(data.type==='frame-error'){this.errors=(this.errors||0)+1;if(this.errors>5){this.stop();this.onStatus('인식이 중단되었습니다. 카메라를 다시 켜 주세요.');}}};
       }catch{
         if(!current())return;this.worker?.terminate();this.worker=null;
-        const model=await createPoseModel(this.onStatus);if(!current()){model.close();return;}this.model=model;
+        const model=await createPoseModel(this.onStatus,this.numPoses);if(!current()){model.close();return;}this.model=model;
       }
       this.onStatus(cameraHint(this.bodyMode));this.timer=setInterval(()=>this.detect(),90);return this.shareStream;
     }catch(error){if(current())this.stop();throw error;}
@@ -28,6 +28,7 @@ export class OnlineCamera{
     if(performance.now()-timestamp>800)return;
     this.errors=0;const raw=selectPose(landmarks,this.bodyMode);
     this.raw=maskLandmarks(raw,this.bodyMode);this.lastPose=performance.now();
+    this.onPoses?.({poses:landmarks,width:this.video.videoWidth,height:this.video.videoHeight,visible:!document.hidden,time:Date.now()-(performance.now()-timestamp)});
     this.onFrame({raw:this.raw,width:this.video.videoWidth,height:this.video.videoHeight,visible:!document.hidden,time:Date.now()-(performance.now()-timestamp)});
   }
   async detect(){
